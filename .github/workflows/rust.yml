@@ -96,5 +96,6 @@ jobs:
             ```
           files: |
             artifacts/smtp2tg-*.tar.gz
+            artifacts/smtp2tg-*.zip
           draft: false
           prerelease: false
