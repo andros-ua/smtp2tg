@@ -114,13 +114,25 @@ jobs:
           # Process each artifact directory
           for artifact_dir in downloaded_artifacts/*/; do
             if [ -d "$artifact_dir" ]; then
-              # Copy binary and checksum to release_assets
-              find "$artifact_dir" -type f -exec cp {} release_assets/ \;
+              # Find and copy the binary file (could be smtp2tg or smtp2tg.exe)
+              find "$artifact_dir" -type f \( -name "smtp2tg" -o -name "smtp2tg.exe" \) -exec cp {} release_assets/ \;
+              # Copy the checksum file
+              find "$artifact_dir" -type f -name "*.sha256" -exec cp {} release_assets/ \;
             fi
           done
           
-          # Compress binaries with proper names
+          # Rename files to expected names
           cd release_assets
+          if [ -f "smtp2tg" ]; then
+            # Handle Linux binaries
+            if [ -f "smtp2tg-arm64-linux.sha256" ]; then
+              mv smtp2tg smtp2tg-arm64-linux
+            else
+              mv smtp2tg smtp2tg-x86_64-linux
+            fi
+          fi
+          
+          # Compress binaries with proper names
           tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg-x86_64-linux
           tar -czvf smtp2tg-arm64-linux.tar.gz smtp2tg-arm64-linux
           zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
