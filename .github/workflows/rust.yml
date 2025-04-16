@@ -80,14 +80,6 @@ jobs:
           pattern: binary-*  # Match the new artifact names
           merge-multiple: true
 
-      - name: Rename artifacts
-        run: |
-          # Remove the 'binary-' prefix from all files
-          cd artifacts
-          for f in binary-*; do
-            mv "$f" "${f#binary-}"
-          done
-
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
