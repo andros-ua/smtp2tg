@@ -51,7 +51,6 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
           rustup target add aarch64-unknown-linux-gnu
 
-      # Linux build (including ARM64 cross-compile)
       - name: Build Linux binaries
         if: matrix.os != 'windows-latest'
         shell: bash
@@ -63,7 +62,6 @@ jobs:
           mkdir -p release
           cp target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }} release/
 
-      # Windows build (simpler, no cross-compile needed)
       - name: Build Windows binary
         if: matrix.os == 'windows-latest'
         shell: pwsh
@@ -94,7 +92,7 @@ jobs:
     permissions:
       contents: write
     if: startsWith(github.ref, 'refs/tags/v')
-    
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,24 +101,35 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: downloaded_artifacts
           pattern: smtp2tg-*
-          merge-multiple: true
+          merge-multiple: false
 
       - name: Prepare release assets
         shell: bash
         run: |
-          # Flatten directory structure
-          find artifacts -name '*.sha256' -exec mv {} artifacts/ \;
-          find artifacts -name 'smtp2tg*' -not -name '*.sha256' -exec mv {} artifacts/ \;
+          # Create clean directory structure
+          mkdir -p release_assets
           
-          # Compress binaries
-          cd artifacts
+          # Process each artifact directory
+          for artifact_dir in downloaded_artifacts/*/; do
+            if [ -d "$artifact_dir" ]; then
+              # Copy binary and checksum to release_assets
+              find "$artifact_dir" -type f -exec cp {} release_assets/ \;
+            fi
+          done
+          
+          # Compress binaries with proper names
+          cd release_assets
           tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg-x86_64-linux
           tar -czvf smtp2tg-arm64-linux.tar.gz smtp2tg-arm64-linux
           zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
+          
+          # Verify files exist
+          ls -lh
+          sha256sum -c *.sha256
 
-          # Prepare checksum text
+          # Prepare checksum text for release notes
           echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
           cat *.sha256 >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -138,11 +147,11 @@ jobs:
             ${{ env.CHECKSUMS }}
             ```
           files: |
-            artifacts/smtp2tg-x86_64-linux.tar.gz
-            artifacts/smtp2tg-x86_64-linux.sha256
-            artifacts/smtp2tg-arm64-linux.tar.gz
-            artifacts/smtp2tg-arm64-linux.sha256
-            artifacts/smtp2tg-x86_64-windows.zip
-            artifacts/smtp2tg-x86_64-windows.sha256
+            release_assets/smtp2tg-x86_64-linux.tar.gz
+            release_assets/smtp2tg-x86_64-linux.sha256
+            release_assets/smtp2tg-arm64-linux.tar.gz
+            release_assets/smtp2tg-arm64-linux.sha256
+            release_assets/smtp2tg-x86_64-windows.zip
+            release_assets/smtp2tg-x86_64-windows.sha256
           draft: false
           prerelease: false
