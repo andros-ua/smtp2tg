@@ -56,21 +56,21 @@ jobs:
           path: artifacts/smtp2tg-${{ matrix.name }}.tar.gz
           retention-days: 1
 
-  release:
-    runs-on: ubuntu-latest
-    needs: build
-    permissions:
-      contents: write
+release:
+  runs-on: ubuntu-latest
+  needs: build
+  permissions:
+    contents: write
 
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
+  steps:
+    - uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+        merge-multiple: true
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          files: artifacts/smtp2tg-*.tar.gz
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: ${{ github.ref_name }}
+        files: artifacts/smtp2tg-*.tar.gz
