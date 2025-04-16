@@ -88,4 +88,61 @@ jobs:
           retention-days: 1
 
   create-release:
-    # ... (rest of your workflow remains unchanged) ...
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: smtp2tg-*
+          merge-multiple: true
+
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          # Flatten directory structure
+          find artifacts -name '*.sha256' -exec mv {} artifacts/ \;
+          find artifacts -name 'smtp2tg*' -not -name '*.sha256' -exec mv {} artifacts/ \;
+          
+          # Compress binaries
+          cd artifacts
+          tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg-x86_64-linux
+          tar -czvf smtp2tg-arm64-linux.tar.gz smtp2tg-arm64-linux
+          zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
+
+          # Prepare checksum text
+          echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
+          cat *.sha256 >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: |
+            Pre-built binaries for ${{ github.ref_name }}
+
+            SHA256 Checksums:
+            ```
+            ${{ env.CHECKSUMS }}
+            ```
+          files: |
+            artifacts/smtp2tg-x86_64-linux.tar.gz
+            artifacts/smtp2tg-x86_64-linux.sha256
+            artifacts/smtp2tg-arm64-linux.tar.gz
+            artifacts/smtp2tg-arm64-linux.sha256
+            artifacts/smtp2tg-x86_64-windows.zip
+            artifacts/smtp2tg-x86_64-windows.sha256
+          draft: false
+          prerelease: false
