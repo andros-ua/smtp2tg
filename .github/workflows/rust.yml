@@ -2,13 +2,8 @@ name: Build and Release
 
 on:
   push:
-    tags: ['v*']  # Triggers on tags like v1.0.0
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version tag (e.g., v1.0.0)'
-        required: true
-        default: 'v1.0.0'
+    tags: ['v*']
+  workflow_dispatch:  # Allows manual triggering
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,25 +12,33 @@ jobs:
   build:
     name: Build for ${{ matrix.target }}
     runs-on: ubuntu-latest
+    continue-on-error: false  # Ensures one failure cancels others
     strategy:
       matrix:
         target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
+        include:
+          - target: x86_64-unknown-linux-gnu
+            docker-platform: linux/amd64
+          - target: aarch64-unknown-linux-gnu
+            docker-platform: linux/arm64
     
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+      # Fixed: Use modern Rust setup action
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-          target: ${{ matrix.target }}
-          override: true
+          targets: ${{ matrix.target }}
+          components: rust-src
 
-      - name: Add cross-compilation support
+      # Fixed: Explicit cross-compilation setup
+      - name: Setup cross-compilation
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu  # ARM64 support
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+          fi
           rustup target add ${{ matrix.target }}
 
       - name: Build release binary
@@ -54,23 +57,25 @@ jobs:
           cd dist
           tar -czvf smtp2tg-${{ matrix.target }}.tar.gz smtp2tg-${{ matrix.target }} smtp2tg-${{ matrix.target }}.sha256
 
+      # Fixed: Updated artifact upload action
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4  # Changed from v3
         with:
           name: smtp2tg-${{ matrix.target }}
           path: dist/smtp2tg-${{ matrix.target }}.tar.gz
+          retention-days: 5
 
   create-release:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: success() && startsWith(github.ref, 'refs/tags/v')
     
     steps:
       - uses: actions/checkout@v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4  # Changed from v3
         with:
           path: artifacts
 
@@ -82,5 +87,3 @@ jobs:
           files: |
             artifacts/smtp2tg-x86_64-unknown-linux-gnu.tar.gz
             artifacts/smtp2tg-aarch64-unknown-linux-gnu.tar.gz
-          draft: false
-          prerelease: false
