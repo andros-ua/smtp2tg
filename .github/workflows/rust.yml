@@ -19,12 +19,12 @@ jobs:
             os: ubuntu-latest
             rust_target: x86_64-unknown-linux-gnu
             artifact_name: smtp2tg-x86_64-linux
-            binary_name: smtp2tg  # Linux binaries typically have no extension
+            binary_name: smtp2tg
           - target: x86_64-windows
             os: windows-latest
             rust_target: x86_64-pc-windows-msvc
             artifact_name: smtp2tg-x86_64-windows
-            binary_name: smtp2tg.exe  # Windows binaries use .exe
+            binary_name: smtp2tg.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -44,19 +44,16 @@ jobs:
         run: |
           cd release
           sha256sum ${{ matrix.binary_name }} > ${{ matrix.artifact_name }}.sha256
+          # Add filename to checksum file for clarity
+          echo "  ${{ matrix.binary_name }}" >> ${{ matrix.artifact_name }}.sha256
 
-      - name: Upload binary
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}-binary
-          path: release/${{ matrix.binary_name }}
-          retention-days: 1
-
-      - name: Upload checksum
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}-checksum
-          path: release/${{ matrix.artifact_name }}.sha256
+          name: ${{ matrix.artifact_name }}
+          path: |
+            release/${{ matrix.binary_name }}
+            release/${{ matrix.artifact_name }}.sha256
           retention-days: 1
 
   create-release:
@@ -72,21 +69,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           pattern: smtp2tg-*
+          merge-multiple: true
 
-      - name: Compress Linux binary
+      - name: Prepare release assets
         run: |
+          # Flatten directory structure
+          find artifacts -name '*.sha256' -exec mv {} artifacts/ \;
+          find artifacts -name 'smtp2tg*' -not -name '*.sha256' -exec mv {} artifacts/ \;
+          
+          # Compress Linux binary
           cd artifacts
           tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg
-
-      - name: Zip Windows binary (no compression to avoid AV false positives)
-        run: |
-          cd artifacts
+          
+          # Zip Windows binary
           zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
+
+          # Prepare checksum text for release body
+          echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
+          cat *.sha256 >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -96,10 +102,9 @@ jobs:
           body: |
             Pre-built binaries for ${{ github.ref_name }}
 
-            **SHA256 Checksums:**
+            SHA256 Checksums:
             ```
-            $(cat artifacts/smtp2tg-x86_64-linux.sha256)
-            $(cat artifacts/smtp2tg-x86_64-windows.sha256)
+            ${{ env.CHECKSUMS }}
             ```
           files: |
             artifacts/smtp2tg-x86_64-linux.tar.gz
