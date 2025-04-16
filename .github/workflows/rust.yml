@@ -40,48 +40,56 @@ jobs:
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
           fi
           cargo build --release --target ${{ matrix.target.rust_target }}
-          mkdir -p dist
-          cp target/${{ matrix.target.rust_target }}/release/smtp2tg dist/smtp2tg-${{ matrix.target.clean_name }}
+          mkdir -p release
+          cp target/${{ matrix.target.rust_target }}/release/smtp2tg release/smtp2tg-${{ matrix.target.clean_name }}
 
       - name: Create checksum
         run: |
-          cd dist
+          cd release
           sha256sum smtp2tg-${{ matrix.target.clean_name }} > smtp2tg-${{ matrix.target.clean_name }}.sha256
 
       - name: Compress artifacts
         run: |
-          cd dist
-          tar -czvf smtp2tg-${{ matrix.target.clean_name }}.tar.gz smtp2tg-${{ matrix.target.clean_name }} smtp2tg-${{ matrix.target.clean_name }}.sha256
+          cd release
+          tar -czvf smtp2tg-${{ matrix.target.clean_name }}.tar.gz smtp2tg-${{ matrix.target.clean_name }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: smtp2tg-${{ matrix.target.clean_name }}
-          path: dist/smtp2tg-${{ matrix.target.clean_name }}.tar.gz
-          retention-days: 1  # Clean up old artifacts
+          name: release_artifacts
+          path: |
+            release/smtp2tg-${{ matrix.target.clean_name }}.tar.gz
+            release/smtp2tg-${{ matrix.target.clean_name }}.sha256
+          retention-days: 1
+          # Disable automatic zipping
+          compression-level: 0
 
   create-release:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Required for creating releases
+      contents: write
     if: startsWith(github.ref, 'refs/tags/v')
     
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Needed for release notes
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
-          pattern: smtp2tg-*.zip
-          merge-multiple: true
+          path: release_artifacts
 
-      - name: List downloaded artifacts
-        run: ls -la artifacts/
+      - name: Prepare release body
+        id: release-body
+        run: |
+          # Combine all checksum files
+          CHECKSUMS=$(cat release_artifacts/*.sha256)
+          echo "checksums<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHECKSUMS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -90,12 +98,13 @@ jobs:
           name: ${{ github.ref_name }}
           body: |
             Pre-built binaries for ${{ github.ref_name }}
+            
             SHA256 Checksums:
             ```
-            $(cat artifacts/*.sha256)
+            ${{ steps.release-body.outputs.checksums }}
             ```
           files: |
-            artifacts/smtp2tg-*.tar.gz
-            artifacts/smtp2tg-*.zip
+            release_artifacts/*.tar.gz
+            release_artifacts/*.sha256
           draft: false
           prerelease: false
