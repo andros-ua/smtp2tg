@@ -30,18 +30,18 @@ jobs:
           cd release
           sha256sum smtp2tg-x86_64-linux > smtp2tg-x86_64-linux.sha256
 
-      - name: Compress artifact
-        run: |
-          cd release
-          tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg-x86_64-linux
-
-      - name: Upload artifacts
+      - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: smtp2tg-x86_64-linux  # Unique artifact name
-          path: |
-            release/smtp2tg-x86_64-linux.tar.gz
-            release/smtp2tg-x86_64-linux.sha256
+          name: smtp2tg-x86_64-linux-binary
+          path: release/smtp2tg-x86_64-linux
+          retention-days: 1
+
+      - name: Upload checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: smtp2tg-x86_64-linux-checksum
+          path: release/smtp2tg-x86_64-linux.sha256
           retention-days: 1
 
   create-release:
@@ -57,16 +57,27 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download artifacts
+      - name: Download binary
         uses: actions/download-artifact@v4
         with:
+          name: smtp2tg-x86_64-linux-binary
           path: artifacts
-          pattern: smtp2tg-*
+
+      - name: Download checksum
+        uses: actions/download-artifact@v4
+        with:
+          name: smtp2tg-x86_64-linux-checksum
+          path: artifacts
 
       - name: Show files for debugging
         run: |
           ls -la artifacts/
-          cat artifacts/*.sha256
+          cat artifacts/smtp2tg-x86_64-linux.sha256
+
+      - name: Compress binary
+        run: |
+          cd artifacts
+          tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg-x86_64-linux
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
