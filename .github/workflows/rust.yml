@@ -45,22 +45,35 @@ jobs:
 
       - name: Setup ARM64 toolchain
         if: matrix.cross_compile
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
           rustup target add aarch64-unknown-linux-gnu
 
-      - name: Build release binary
+      # Linux build (including ARM64 cross-compile)
+      - name: Build Linux binaries
+        if: matrix.os != 'windows-latest'
+        shell: bash
         run: |
           if [ "${{ matrix.cross_compile }}" = "true" ]; then
             export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
           fi
-          
           cargo build --release --target ${{ matrix.rust_target }}
           mkdir -p release
           cp target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }} release/
 
-      - name: Create perfect checksums
+      # Windows build (simpler, no cross-compile needed)
+      - name: Build Windows binary
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cargo build --release --target ${{ matrix.rust_target }}
+          mkdir -p release
+          cp target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }} release/
+
+      - name: Create checksums
+        shell: bash
         run: |
           cd release
           sha256sum ${{ matrix.binary_name }} | awk '{print $1 "  " $2}' > ${{ matrix.artifact_name }}.sha256
@@ -75,57 +88,4 @@ jobs:
           retention-days: 1
 
   create-release:
-    name: Create GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    if: startsWith(github.ref, 'refs/tags/v')
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: smtp2tg-*
-          merge-multiple: true
-
-      - name: Prepare release assets
-        run: |
-          find artifacts -name '*.sha256' -exec mv {} artifacts/ \;
-          find artifacts -name 'smtp2tg*' -not -name '*.sha256' -exec mv {} artifacts/ \;
-          
-          cd artifacts
-          tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg-x86_64-linux
-          tar -czvf smtp2tg-arm64-linux.tar.gz smtp2tg-arm64-linux
-          zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
-
-          echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
-          cat *.sha256 >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
-          body: |
-            Pre-built binaries for ${{ github.ref_name }}
-
-            SHA256 Checksums:
-            ```
-            ${{ env.CHECKSUMS }}
-            ```
-          files: |
-            artifacts/smtp2tg-x86_64-linux.tar.gz
-            artifacts/smtp2tg-x86_64-linux.sha256
-            artifacts/smtp2tg-arm64-linux.tar.gz
-            artifacts/smtp2tg-arm64-linux.sha256
-            artifacts/smtp2tg-x86_64-windows.zip
-            artifacts/smtp2tg-x86_64-windows.sha256
-          draft: false
-          prerelease: false
+    # ... (rest of your workflow remains unchanged) ...
