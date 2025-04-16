@@ -28,12 +28,12 @@ jobs:
           mkdir -p release
           cp target/x86_64-pc-windows-msvc/release/smtp2tg.exe release/
 
-      - name: Create checksum
-        shell: bash
+      - name: Create checksum (PowerShell)
+        shell: pwsh
         run: |
           cd release
-          sha256sum smtp2tg.exe > smtp2tg-x86_64-windows.sha256
-
+          $hash = (Get-FileHash -Algorithm SHA256 smtp2tg.exe).Hash.ToLower()
+          "${hash} *smtp2tg.exe" | Out-File -Encoding ASCII smtp2tg-x86_64-windows.sha256
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
