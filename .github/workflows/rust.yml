@@ -100,6 +100,6 @@ jobs:
             $(cat artifacts/*.sha256 || echo "No checksums found")
             ```
           files: |
-            artifacts/smtp2tg-*.tar.gz
+            artifacts/**/smtp2tg-*.tar.gz
           draft: false
           prerelease: false
