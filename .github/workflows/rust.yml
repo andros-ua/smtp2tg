@@ -77,7 +77,9 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: smtp2tg-*.tar.gz
+          pattern: |
+            smtp2tg-*.tar.gz
+            smtp2tg-*.zip
           merge-multiple: true
 
       - name: List downloaded artifacts
