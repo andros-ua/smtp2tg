@@ -153,22 +153,26 @@ jobs:
           echo "Final release assets:"
           ls -lh
           
-          # Verify checksums by creating temporary copies with expected names
+          # Verify checksums by creating temporary structure
           mkdir -p verify_temp
           for platform in x86_64-linux arm64-linux x86_64-windows; do
             if [ -f "smtp2tg-$platform" ]; then
-              cp "smtp2tg-$platform" "verify_temp/smtp2tg${platform##*-}"
-              # Fix Windows executable name
-              if [ "$platform" = "x86_64-windows" ]; then
-                mv "verify_temp/smtp2tg${platform##*-}" "verify_temp/smtp2tg.exe"
-              fi
-              # Create checksum file with simple name
-              awk '{print $1}' "smtp2tg-$platform.sha256" > "verify_temp/smtp2tg${platform##*-}.sha256"
+              # Create properly formatted checksum file
+              awk '{print $1}' "smtp2tg-$platform.sha256" | while read hash; do
+                if [ "$platform" = "x86_64-windows" ]; then
+                  echo "$hash  smtp2tg.exe" > "verify_temp/checksum.sha256"
+                  cp "smtp2tg-$platform" "verify_temp/smtp2tg.exe"
+                else
+                  echo "$hash  smtp2tg" > "verify_temp/checksum.sha256"
+                  cp "smtp2tg-$platform" "verify_temp/smtp2tg"
+                fi
+              done
+              
+              echo "Verifying $platform:"
+              (cd verify_temp && sha256sum -c checksum.sha256)
+              rm -f verify_temp/*
             fi
           done
-          
-          echo "Checksum verification:"
-          (cd verify_temp && sha256sum -c *.sha256)
           
           # Clean up verification files
           rm -rf verify_temp
