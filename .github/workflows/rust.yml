@@ -1,76 +1,57 @@
-name: Build and Release
+name: Release Rust Project
 
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
-
-env:
-  CARGO_TERM_COLOR: always
 
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            name: x86_64-linux
-          - target: aarch64-unknown-linux-gnu
-            name: arm64-linux
+        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
         with:
-          targets: ${{ matrix.target }}
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
 
-      - name: Install dependencies for cross-compilation
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          mkdir -p out
+          cp target/${{ matrix.target }}/release/smtp2tg out/smtp2tg-${{ matrix.target }}
+          tar -czvf smtp2tg-${{ matrix.target }}.tar.gz -C out smtp2tg-${{ matrix.target }}
 
-      - name: Build binary
-        run: |
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          fi
-          cargo build --release --target ${{ matrix.target }}
-
-      - name: Package binary
-        run: |
-          mkdir -p artifacts
-          BIN="smtp2tg-${{ matrix.name }}"
-          cp target/${{ matrix.target }}/release/smtp2tg $BIN
-          sha256sum $BIN > $BIN.sha256
-          tar czf artifacts/$BIN.tar.gz $BIN $BIN.sha256
-
-      - name: Upload artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: artifacts/smtp2tg-${{ matrix.name }}.tar.gz
-          retention-days: 1
+          name: smtp2tg-${{ matrix.target }}
+          path: smtp2tg-${{ matrix.target }}.tar.gz
 
-release:
-  runs-on: ubuntu-latest
-  needs: build
-  permissions:
-    contents: write
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
-  steps:
-    - uses: actions/download-artifact@v4
-      with:
-        path: artifacts
-        merge-multiple: true
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
 
-    - name: Create GitHub Release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: ${{ github.ref_name }}
-        name: ${{ github.ref_name }}
-        files: artifacts/smtp2tg-*.tar.gz
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: artifacts/*.tar.gz
