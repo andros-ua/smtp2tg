@@ -1,0 +1,386 @@
+use std::{
+    env,
+    io::{self, BufRead, BufReader, BufWriter, Write},
+    net::{TcpListener, TcpStream},
+    sync::Arc,
+};
+
+use once_cell::sync::Lazy;
+use reqwest::blocking::Client;
+use serde_json::json;
+
+static HTTP_CLIENT: Lazy<Client> = Lazy::new(|| 
+    Client::builder()
+        .pool_max_idle_per_host(20)
+        .build()
+        .unwrap()
+);
+
+#[derive(Debug)]
+struct Config {
+    telegram_token: String,
+    telegram_chat_id: String,
+    parse_mode: String,
+    verbose: bool,
+}
+
+fn print_help() {
+    println!("smtp2tg - SMTP to Telegram Gateway");
+    println!("\nUsage:");
+    println!("  smtp2tg [OPTIONS]");
+    println!("\nRequired Options:");
+    println!("  -t, --token <TOKEN>      Telegram bot token");
+    println!("  -c, --chatid <CHAT_ID>   Telegram chat ID");
+    println!("\nOptional Options:");
+    println!("  -p, --parsemode <MODE>   Parse mode (MarkdownV2 or HTML) [default: MarkdownV2]");
+    println!("  -v, --verbose            Enable verbose logging");
+    println!("  -h, --help               Show this help message");
+    println!("\nExample:");
+    println!("  smtp2tg --token 123:ABC --chatid 456789 --parsemode HTML --verbose");
+}
+
+fn parse_args() -> Config {
+    let args: Vec<String> = env::args().collect();
+    
+    // Show help if no args or help requested
+    if args.len() == 1 || args.contains(&"--help".into()) || args.contains(&"-h".into()) {
+        print_help();
+        std::process::exit(0);
+    }
+
+    let mut config = Config {
+        telegram_token: String::new(),
+        telegram_chat_id: String::new(),
+        parse_mode: "MarkdownV2".to_string(),
+        verbose: false,
+    };
+
+    let mut args_iter = env::args().skip(1);
+    while let Some(arg) = args_iter.next() {
+        match arg.as_str() {
+            "--token" | "-t" => {
+                config.telegram_token = args_iter.next().unwrap_or_else(|| {
+                    eprintln!("ERROR: --token requires a value");
+                    std::process::exit(1);
+                });
+            }
+            "--chatid" | "-c" => {
+                config.telegram_chat_id = args_iter.next().unwrap_or_else(|| {
+                    eprintln!("ERROR: --chatid requires a value");
+                    std::process::exit(1);
+                });
+            }
+            "--parsemode" | "-p" => {
+                if let Some(mode) = args_iter.next() {
+                    config.parse_mode = mode;
+                }
+            }
+            "--verbose" | "-v" => {
+                config.verbose = true;
+            }
+            _ => {
+                eprintln!("ERROR: Unknown argument '{}'", arg);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // ENFORCE REQUIRED PARAMETERS
+    if config.telegram_token.is_empty() {
+        eprintln!("ERROR: --token is required");
+        print_help();
+        std::process::exit(1);
+    }
+    if config.telegram_chat_id.is_empty() {
+        eprintln!("ERROR: --chatid is required");
+        print_help();
+        std::process::exit(1);
+    }
+
+    config
+}
+
+fn process_email(reader: &mut BufReader<TcpStream>, config: &Config) -> io::Result<(String, String, String, String)> {
+    let mut headers_done = false;
+    let mut from = String::new();
+    let mut to = String::new();
+    let mut subject = String::new();
+    let mut body = String::with_capacity(512);
+    let mut line_buf = String::with_capacity(128);
+
+    while reader.read_line(&mut line_buf)? > 0 {
+        let line = line_buf.trim_end();
+        
+        if line == "." {
+            break;
+        }
+
+        if !headers_done {
+            match parse_header(line, &mut from, &mut to, &mut subject) {
+                HeadersState::Complete => headers_done = true,
+                HeadersState::Incomplete => {},
+                HeadersState::Invalid => break,
+            }
+        } else if body.len() < 500 {
+            body.push_str(line);
+            body.push('\n');
+        }
+
+        line_buf.clear();
+    }
+
+    Ok((from, to, subject, body))
+}
+
+enum HeadersState {
+    Complete,
+    Incomplete,
+    Invalid,
+}
+
+fn parse_header(line: &str, from: &mut String, to: &mut String, subject: &mut String) -> HeadersState {
+    if let Some(header) = line.as_bytes().get(..5) {
+        match header {
+            b"From:" | b"from:" => {
+                *from = line[5..].trim().to_string();
+            }
+            b"To: " | b"to: " => {
+                *to = line[3..].trim().to_string();
+            }
+            b"Subje" if line.starts_with("Subject:") => {
+                *subject = line[8..].trim().to_string();
+            }
+            _ => {}
+        }
+    }
+
+    if !from.is_empty() && !to.is_empty() && !subject.is_empty() {
+        HeadersState::Complete
+    } else if line.is_empty() {
+        HeadersState::Invalid
+    } else {
+        HeadersState::Incomplete
+    }
+}
+
+fn format_message(subject: &str, from: &str, to: &str, body: &str, parse_mode: &str) -> String {
+    match parse_mode {
+        "HTML" => format_html_message(subject, from, to, body),
+        "MarkdownV2" => format_markdown_message(subject, from, to, body),
+        _ => format_markdown_message(subject, from, to, body) // Default fallback
+    }
+}
+
+fn format_html_message(subject: &str, from: &str, to: &str, body: &str) -> String {
+    format!(
+        "<b>📧 New Email</b>\n\
+        <b>From:</b> <code>{}</code>\n\
+        <b>To:</b> <code>{}</code>\n\
+        <b>Subject:</b> <i>{}</i>\n\
+        <pre>{}</pre>",
+        html_escape(from),
+        html_escape(to),
+        html_escape(subject),
+        html_escape(trim_body(body))
+    )
+}
+
+fn format_markdown_message(subject: &str, from: &str, to: &str, body: &str) -> String {
+    format!(
+        "*📧 New Email*\n\
+        *From:* `{}`\n\
+        *To:* `{}`\n\
+        *Subject:* _{}_\n\
+        ```\n{}\n```",
+        escape_markdown(from),
+        escape_markdown(to),
+        escape_markdown(subject),
+        escape_markdown(trim_body(body))
+    )
+}
+
+fn trim_body(body: &str) -> &str {
+    body.trim().trim_start_matches("> ").trim_end()
+}
+
+// Updated escaping functions
+fn html_escape(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '&' => output.push_str("&amp;"),
+            '<' => output.push_str("&lt;"),
+            '>' => output.push_str("&gt;"),
+            '"' => output.push_str("&quot;"),
+            '\'' => output.push_str("&#39;"),
+            _ => output.push(c),
+        }
+    }
+    output
+}
+
+fn escape_markdown(text: &str) -> String {
+    const MARKDOWN_SPECIAL: [char; 16] = [
+        '_', '*', '[', ']', '(', ')', '~', '`',
+        '>', '#', '+', '-', '=', '|', '{', '}'
+    ];
+    
+    let mut output = String::with_capacity(text.len() * 2);
+    for c in text.chars() {
+        if MARKDOWN_SPECIAL.contains(&c) {
+            output.push('\\');
+        }
+        output.push(c);
+    }
+    output
+}
+
+
+fn send_telegram(text: &str, config: &Config, client: &Client) -> Result<(), reqwest::Error> {
+    let url = format!(
+        "https://api.telegram.org/bot{}/sendMessage",
+        config.telegram_token
+    );
+
+    let payload = json!({
+        "chat_id": config.telegram_chat_id,
+        "text": text,
+        "parse_mode": config.parse_mode,
+    });
+
+    let response = client.post(&url).json(&payload).send()?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(response.error_for_status().unwrap_err())
+    }
+}
+
+fn quote_markdown(text: &str) -> String {
+    text.lines()
+        .map(|line| format!("> {}", escape_markdown(line)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn main() -> io::Result<()> {
+    let config = Arc::new(parse_args());
+
+    let listener = TcpListener::bind("0.0.0.0:2525")?;
+    if config.verbose {
+        println!("SMTP server listening on :2525");
+    }
+
+    for stream in listener.incoming() {
+        let config = Arc::clone(&config);
+        let client = HTTP_CLIENT.clone();
+
+        std::thread::spawn(move || {
+            let stream = stream.unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut writer = BufWriter::new(stream);
+
+            if let Err(e) = handle_smtp(&mut reader, &mut writer, &config, &client) {
+                if config.verbose {
+                    eprintln!("Connection error: {}", e);
+                }
+            }
+        });
+    }
+    Ok(())
+}
+
+fn handle_smtp(
+    reader: &mut BufReader<TcpStream>,
+    writer: &mut BufWriter<TcpStream>,
+    config: &Config,
+    client: &Client,
+) -> io::Result<()> {
+    writeln!(writer, "220 smtp-bot Service Ready")?;
+    writer.flush()?;
+
+    let mut has_mail = false;
+    let mut has_rcpt = false;
+    let mut line_buf = String::with_capacity(256);
+
+    loop {
+        line_buf.clear();
+        reader.read_line(&mut line_buf)?;
+        let cmd = line_buf.trim_end();
+
+        if config.verbose {
+            println!("Client command: {}", cmd);
+        }
+
+        if cmd.starts_with("EHLO") {
+            writeln!(writer, "250-smtp-bot Hello\r\n250 HELP")?;
+            writer.flush()?;
+            continue;
+        }
+
+        if cmd.starts_with("HELO") {
+            writeln!(writer, "250 smtp-bot Hello")?;
+            writer.flush()?;
+            continue;
+        }
+
+        if cmd.starts_with("MAIL FROM:") {
+            has_mail = true;
+            writeln!(writer, "250 OK")?;
+            writer.flush()?;
+            continue;
+        }
+
+        if cmd.starts_with("RCPT TO:") {
+            if !has_mail {
+                writeln!(writer, "503 Need MAIL command first")?;
+                writer.flush()?;
+                continue;
+            }
+            has_rcpt = true;
+            writeln!(writer, "250 OK")?;
+            writer.flush()?;
+            continue;
+        }
+
+        if cmd.starts_with("DATA") {
+            if !has_mail || !has_rcpt {
+                writeln!(writer, "503 Need MAIL and RCPT first")?;
+                writer.flush()?;
+                continue;
+            }
+            writeln!(writer, "354 End data with <CR><LF>.<CR><LF>")?;
+            writer.flush()?;
+            if config.verbose {
+                println!("DATA command received, starting to read email data...");
+            }
+            break;
+        }
+
+        if cmd.starts_with("QUIT") {
+            writeln!(writer, "221 Bye")?;
+            writer.flush()?;
+            if config.verbose {
+                println!("client quit connection");
+            }
+            return Ok(());
+        }
+
+        writeln!(writer, "502 Command not implemented")?;
+        writer.flush()?;
+    }
+
+    let (from, to, subject, snippet) = process_email(reader, config)?;
+    let msg = format_message(&subject, &from, &to, &snippet, &config.parse_mode);
+    
+    if let Err(e) = send_telegram(&msg, config, client) {
+        eprintln!("Telegram send error: {}", e);
+    } else if config.verbose {
+        println!("Telegram message sent successfully");
+    }
+
+    writeln!(writer, "250 OK")?;
+    writer.flush()?;
+
+    Ok(())
+}
