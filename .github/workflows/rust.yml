@@ -1,4 +1,4 @@
-name: Build and Release (Single Platform)
+name: Build and Release (Linux + Windows)
 
 on:
   push:
@@ -10,38 +10,53 @@ env:
 
 jobs:
   build:
-    name: Build for x86_64 Linux
-    runs-on: ubuntu-latest
-    
+    name: Build for ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-linux
+            os: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            artifact_name: smtp2tg-x86_64-linux
+            binary_name: smtp2tg  # Linux binaries typically have no extension
+          - target: x86_64-windows
+            os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            artifact_name: smtp2tg-x86_64-windows
+            binary_name: smtp2tg.exe  # Windows binaries use .exe
+
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
 
       - name: Build release binary
         run: |
-          cargo build --release
+          cargo build --release --target ${{ matrix.rust_target }}
           mkdir -p release
-          cp target/release/smtp2tg release/smtp2tg-x86_64-linux
+          cp target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }} release/
 
       - name: Create checksum
         run: |
           cd release
-          sha256sum smtp2tg-x86_64-linux > smtp2tg-x86_64-linux.sha256
+          sha256sum ${{ matrix.binary_name }} > ${{ matrix.artifact_name }}.sha256
 
       - name: Upload binary
         uses: actions/upload-artifact@v4
         with:
-          name: smtp2tg-x86_64-linux-binary
-          path: release/smtp2tg-x86_64-linux
+          name: ${{ matrix.artifact_name }}-binary
+          path: release/${{ matrix.binary_name }}
           retention-days: 1
 
       - name: Upload checksum
         uses: actions/upload-artifact@v4
         with:
-          name: smtp2tg-x86_64-linux-checksum
-          path: release/smtp2tg-x86_64-linux.sha256
+          name: ${{ matrix.artifact_name }}-checksum
+          path: release/${{ matrix.artifact_name }}.sha256
           retention-days: 1
 
   create-release:
@@ -51,33 +66,27 @@ jobs:
     permissions:
       contents: write
     if: startsWith(github.ref, 'refs/tags/v')
-    
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Download binary
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: smtp2tg-x86_64-linux-binary
           path: artifacts
+          pattern: smtp2tg-*
 
-      - name: Download checksum
-        uses: actions/download-artifact@v4
-        with:
-          name: smtp2tg-x86_64-linux-checksum
-          path: artifacts
-
-      - name: Show files for debugging
-        run: |
-          ls -la artifacts/
-          cat artifacts/smtp2tg-x86_64-linux.sha256
-
-      - name: Compress binary
+      - name: Compress Linux binary
         run: |
           cd artifacts
-          tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg-x86_64-linux
+          tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg
+
+      - name: Zip Windows binary (no compression to avoid AV false positives)
+        run: |
+          cd artifacts
+          zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -85,14 +94,17 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           body: |
-            Pre-built binary for ${{ github.ref_name }}
-            
-            SHA256 Checksum:
+            Pre-built binaries for ${{ github.ref_name }}
+
+            **SHA256 Checksums:**
             ```
             $(cat artifacts/smtp2tg-x86_64-linux.sha256)
+            $(cat artifacts/smtp2tg-x86_64-windows.sha256)
             ```
           files: |
             artifacts/smtp2tg-x86_64-linux.tar.gz
             artifacts/smtp2tg-x86_64-linux.sha256
+            artifacts/smtp2tg-x86_64-windows.zip
+            artifacts/smtp2tg-x86_64-windows.sha256
           draft: false
           prerelease: false
