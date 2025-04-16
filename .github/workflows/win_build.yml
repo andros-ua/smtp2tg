@@ -14,6 +14,7 @@ jobs:
     runs-on: windows-latest
 
     steps:
+      # All Windows steps use pwsh (correct)
       - uses: actions/checkout@v4
 
       - name: Install Rust
@@ -26,14 +27,17 @@ jobs:
         run: |
           cargo build --release --target x86_64-pc-windows-msvc
           mkdir -p release
-          cp target/x86_64-pc-windows-msvc/release/smtp2tg.exe release/
+          Copy-Item target/x86_64-pc-windows-msvc/release/smtp2tg.exe release/
+          Write-Output "=== Built files ==="
+          Get-ChildItem release
 
-      - name: Create checksum (PowerShell)
+      - name: Create checksum
         shell: pwsh
         run: |
-          cd release
-          $hash = (Get-FileHash -Algorithm SHA256 smtp2tg.exe).Hash.ToLower()
-          "${hash} *smtp2tg.exe" | Out-File -Encoding ASCII smtp2tg-x86_64-windows.sha256
+          $hash = (Get-FileHash -Path release/smtp2tg.exe -Algorithm SHA256).Hash.ToLower()
+          "${hash} *smtp2tg.exe" | Out-File -Encoding ASCII release/smtp2tg-x86_64-windows.sha256
+          Get-Content release/smtp2tg-x86_64-windows.sha256
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -57,18 +61,32 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: false
+
+      - name: Debug artifact structure
+        shell: bash  # Linux-native shell
+        run: |
+          echo "=== Artifact structure ==="
+          ls -R artifacts/
+          echo "=== Checksum content ==="
+          cat artifacts/smtp2tg-x86_64-windows/smtp2tg-x86_64-windows.sha256
 
       - name: Prepare release
+        shell: bash  # Linux-native shell
         run: |
           mkdir -p release_assets
-          cp artifacts/smtp2tg.exe release_assets/
-          cp artifacts/smtp2tg-x86_64-windows.sha256 release_assets/
+          cp artifacts/smtp2tg-x86_64-windows/* release_assets/
+          echo "=== Files to package ==="
+          ls -lh release_assets/
+          
           cd release_assets
           zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
+          echo "=== Final assets ==="
+          ls -lh
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            release_assets/*.zip
-            release_assets/*.sha256
+            release_assets/smtp2tg-x86_64-windows.zip
+            release_assets/smtp2tg-x86_64-windows.sha256
