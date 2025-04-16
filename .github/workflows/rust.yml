@@ -101,47 +101,55 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: downloaded_artifacts
+          path: artifact_downloads
           pattern: smtp2tg-*
           merge-multiple: false
 
       - name: Prepare release assets
         shell: bash
         run: |
-          # Create clean directory structure
+          # Create clean output directory
           mkdir -p release_assets
           
-          # Process each artifact directory
-          for artifact_dir in downloaded_artifacts/*/; do
-            if [ -d "$artifact_dir" ]; then
-              # Find and copy the binary file (could be smtp2tg or smtp2tg.exe)
-              find "$artifact_dir" -type f \( -name "smtp2tg" -o -name "smtp2tg.exe" \) -exec cp {} release_assets/ \;
-              # Copy the checksum file
-              find "$artifact_dir" -type f -name "*.sha256" -exec cp {} release_assets/ \;
+          # Process each downloaded artifact
+          for artifact_dir in artifact_downloads/*/; do
+            echo "Processing artifact: $artifact_dir"
+            
+            # Extract platform from directory name
+            if [[ "$artifact_dir" == *"x86_64-linux"* ]]; then
+              platform="x86_64-linux"
+              binary_name="smtp2tg"
+            elif [[ "$artifact_dir" == *"arm64-linux"* ]]; then
+              platform="arm64-linux"
+              binary_name="smtp2tg"
+            elif [[ "$artifact_dir" == *"x86_64-windows"* ]]; then
+              platform="x86_64-windows"
+              binary_name="smtp2tg.exe"
+            else
+              echo "Unknown artifact type: $artifact_dir"
+              exit 1
             fi
+          
+            # Find and copy the binary
+            find "$artifact_dir" -type f \( -name "$binary_name" -o -name "smtp2tg" -o -name "smtp2tg.exe" \) -exec cp {} "release_assets/smtp2tg-$platform" \;
+            
+            # Find and copy the checksum
+            find "$artifact_dir" -type f -name "*.sha256" -exec cp {} "release_assets/smtp2tg-$platform.sha256" \;
           done
           
-          # Rename files to expected names
+          # Compress binaries
           cd release_assets
-          if [ -f "smtp2tg" ]; then
-            # Handle Linux binaries
-            if [ -f "smtp2tg-arm64-linux.sha256" ]; then
-              mv smtp2tg smtp2tg-arm64-linux
-            else
-              mv smtp2tg smtp2tg-x86_64-linux
-            fi
-          fi
-          
-          # Compress binaries with proper names
           tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg-x86_64-linux
           tar -czvf smtp2tg-arm64-linux.tar.gz smtp2tg-arm64-linux
-          zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
+          zip -0 smtp2tg-x86_64-windows.zip smtp2tg-x86_64-windows
           
-          # Verify files exist
+          # Verify files
+          echo "Final release assets:"
           ls -lh
+          echo "Checksum verification:"
           sha256sum -c *.sha256
 
-          # Prepare checksum text for release notes
+          # Prepare release notes content
           echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
           cat *.sha256 >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
