@@ -153,20 +153,25 @@ jobs:
           echo "Final release assets:"
           ls -lh
           
-          # Verify checksums in separate directories to avoid conflicts
-          mkdir -p verify_linux verify_windows
-          cp smtp2tg-x86_64-linux verify_linux/smtp2tg
-          cp smtp2tg-arm64-linux verify_linux/smtp2tg
-          cp smtp2tg-x86_64-windows verify_windows/smtp2tg.exe
+          # Verify checksums by creating temporary copies with expected names
+          mkdir -p verify_temp
+          for platform in x86_64-linux arm64-linux x86_64-windows; do
+            if [ -f "smtp2tg-$platform" ]; then
+              cp "smtp2tg-$platform" "verify_temp/smtp2tg${platform##*-}"
+              # Fix Windows executable name
+              if [ "$platform" = "x86_64-windows" ]; then
+                mv "verify_temp/smtp2tg${platform##*-}" "verify_temp/smtp2tg.exe"
+              fi
+              # Create checksum file with simple name
+              awk '{print $1}' "smtp2tg-$platform.sha256" > "verify_temp/smtp2tg${platform##*-}.sha256"
+            fi
+          done
           
-          echo "Linux checksum verification:"
-          (cd verify_linux && sha256sum -c ../smtp2tg-*-linux.sha256)
+          echo "Checksum verification:"
+          (cd verify_temp && sha256sum -c *.sha256)
           
-          echo "Windows checksum verification:"
-          (cd verify_windows && sha256sum -c ../smtp2tg-x86_64-windows.sha256)
-          
-          # Clean up verification directories
-          rm -rf verify_linux verify_windows
+          # Clean up verification files
+          rm -rf verify_temp
           
           # Prepare release notes content
           echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
