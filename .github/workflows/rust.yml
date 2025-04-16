@@ -1,22 +1,50 @@
-name: Rust
+name: Rust CI & Release
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main" ]  # Triggers on commits to main
+    tags: [ 'v*' ]        # ALSO triggers on tags like v1.0.0
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main" ]  # Triggers on PRs
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  test:                   # Runs on PRs/main branch pushes
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v4
+      - name: Build and Test
+        run: |
+          cargo build --verbose
+          cargo test --verbose
+
+  release:                # Runs ONLY on tag pushes (v*)
+    if: startsWith(github.ref, 'refs/tags/v')  # Extra safety check
+    needs: test           # Optional: Wait for tests to pass first
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (for ${{ matrix.target }})
+        uses: actions-rs/toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+          override: true
+      - name: Build Release
+        run: |
+          cargo build --release --target ${{ matrix.target }}
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/smtp2tg dist/smtp2tg-${{ matrix.target }}
+      - name: Compress
+        run: |
+          cd dist
+          tar -czvf smtp2tg-${{ matrix.target }}.tar.gz smtp2tg-${{ matrix.target }}
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: smtp2tg-${{ matrix.target }}
+          path: dist/smtp2tg-${{ matrix.target }}.tar.gz
