@@ -56,7 +56,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: smtp2tg-${{ matrix.target.clean_name }}
+          name: binary-${{ matrix.target.clean_name }}  # Changed prefix to 'binary-'
           path: dist/smtp2tg-${{ matrix.target.clean_name }}.tar.gz
           retention-days: 1
 
@@ -77,19 +77,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: smtp2tg-*.tar.gz
+          pattern: binary-*  # Match the new artifact names
           merge-multiple: true
 
-      - name: Move artifacts to root directory
+      - name: Rename artifacts
         run: |
-          # Move files from their subdirectories to the artifacts root
-          find artifacts -name '*.tar.gz' -exec mv {} artifacts/ \;
-          find artifacts -name '*.sha256' -exec mv {} artifacts/ \;
-          # Remove empty subdirectories
-          find artifacts -type d -empty -delete
-
-      - name: List downloaded artifacts
-        run: ls -la artifacts/
+          # Remove the 'binary-' prefix from all files
+          cd artifacts
+          for f in binary-*; do
+            mv "$f" "${f#binary-}"
+          done
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
