@@ -63,7 +63,6 @@ jobs:
       - name: Create perfect checksums
         run: |
           cd release
-          # Generate clean checksum format (hash + double space + filename)
           sha256sum ${{ matrix.binary_name }} | awk '{print $1 "  " $2}' > ${{ matrix.artifact_name }}.sha256
 
       - name: Upload artifacts
@@ -97,17 +96,14 @@ jobs:
 
       - name: Prepare release assets
         run: |
-          # Flatten directory structure
           find artifacts -name '*.sha256' -exec mv {} artifacts/ \;
           find artifacts -name 'smtp2tg*' -not -name '*.sha256' -exec mv {} artifacts/ \;
           
-          # Compress binaries
           cd artifacts
           tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg-x86_64-linux
           tar -czvf smtp2tg-arm64-linux.tar.gz smtp2tg-arm64-linux
           zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
 
-          # Prepare checksum text
           echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
           cat *.sha256 >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
