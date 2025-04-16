@@ -133,8 +133,14 @@ jobs:
             # Find and copy the binary
             find "$artifact_dir" -type f \( -name "$binary_name" -o -name "smtp2tg" -o -name "smtp2tg.exe" \) -exec cp {} "release_assets/smtp2tg-$platform" \;
             
-            # Find and copy the checksum
-            find "$artifact_dir" -type f -name "*.sha256" -exec cp {} "release_assets/smtp2tg-$platform.sha256" \;
+            # Find and fix the checksum file
+            find "$artifact_dir" -type f -name "*.sha256" -exec sh -c '
+              platform="$1"
+              src_file="$2"
+              dest_dir="$3"
+              # Extract the hash and create new checksum file with correct filename
+              awk "{print \$1 \"  smtp2tg-$platform\"}" "$src_file" > "$dest_dir/smtp2tg-$platform.sha256"
+            ' sh "$platform" {} "release_assets" \;
           done
           
           # Compress binaries
@@ -146,9 +152,21 @@ jobs:
           # Verify files
           echo "Final release assets:"
           ls -lh
+          
+          # Create temporary files for checksum verification
+          ln -s smtp2tg-x86_64-linux smtp2tg
+          ln -s smtp2tg-arm64-linux smtp2tg
+          ln -s smtp2tg-x86_64-windows 'smtp2tg.exe'
+          
           echo "Checksum verification:"
-          sha256sum -c *.sha256
-
+          if ! sha256sum -c *.sha256; then
+            echo "Checksum verification failed!"
+            exit 1
+          fi
+          
+          # Clean up temporary files
+          rm -f smtp2tg 'smtp2tg.exe'
+          
           # Prepare release notes content
           echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
           cat *.sha256 >> $GITHUB_ENV
