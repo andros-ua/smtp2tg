@@ -1,4 +1,4 @@
-name: Build and Release (Linux + Windows)
+name: Build and Release
 
 on:
   push:
@@ -11,20 +11,29 @@ env:
 jobs:
   build:
     name: Build for ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     strategy:
       matrix:
         include:
+          # x86_64 Linux
           - target: x86_64-linux
-            os: ubuntu-latest
             rust_target: x86_64-unknown-linux-gnu
             artifact_name: smtp2tg-x86_64-linux
             binary_name: smtp2tg
+
+          # ARM64 Linux
+          - target: arm64-linux
+            rust_target: aarch64-unknown-linux-gnu
+            artifact_name: smtp2tg-arm64-linux
+            binary_name: smtp2tg
+            cross_compile: true
+
+          # Windows
           - target: x86_64-windows
-            os: windows-latest
             rust_target: x86_64-pc-windows-msvc
             artifact_name: smtp2tg-x86_64-windows
             binary_name: smtp2tg.exe
+            os: windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -34,18 +43,28 @@ jobs:
         with:
           targets: ${{ matrix.rust_target }}
 
+      - name: Setup ARM64 toolchain
+        if: matrix.cross_compile
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          rustup target add aarch64-unknown-linux-gnu
+
       - name: Build release binary
         run: |
+          if [ "${{ matrix.cross_compile }}" = "true" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          
           cargo build --release --target ${{ matrix.rust_target }}
           mkdir -p release
           cp target/${{ matrix.rust_target }}/release/${{ matrix.binary_name }} release/
 
-      - name: Create checksum
+      - name: Create perfect checksums
         run: |
           cd release
-          sha256sum ${{ matrix.binary_name }} > ${{ matrix.artifact_name }}.sha256
-          # Add filename to checksum file for clarity
-          echo "  ${{ matrix.binary_name }}" >> ${{ matrix.artifact_name }}.sha256
+          # Generate clean checksum format (hash + double space + filename)
+          sha256sum ${{ matrix.binary_name }} | awk '{print $1 "  " $2}' > ${{ matrix.artifact_name }}.sha256
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -82,14 +101,13 @@ jobs:
           find artifacts -name '*.sha256' -exec mv {} artifacts/ \;
           find artifacts -name 'smtp2tg*' -not -name '*.sha256' -exec mv {} artifacts/ \;
           
-          # Compress Linux binary
+          # Compress binaries
           cd artifacts
-          tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg
-          
-          # Zip Windows binary
+          tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg-x86_64-linux
+          tar -czvf smtp2tg-arm64-linux.tar.gz smtp2tg-arm64-linux
           zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
 
-          # Prepare checksum text for release body
+          # Prepare checksum text
           echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
           cat *.sha256 >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -109,6 +127,8 @@ jobs:
           files: |
             artifacts/smtp2tg-x86_64-linux.tar.gz
             artifacts/smtp2tg-x86_64-linux.sha256
+            artifacts/smtp2tg-arm64-linux.tar.gz
+            artifacts/smtp2tg-arm64-linux.sha256
             artifacts/smtp2tg-x86_64-windows.zip
             artifacts/smtp2tg-x86_64-windows.sha256
           draft: false
