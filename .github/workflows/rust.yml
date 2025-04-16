@@ -58,20 +58,20 @@ jobs:
         with:
           name: smtp2tg-${{ matrix.target.clean_name }}
           path: dist/smtp2tg-${{ matrix.target.clean_name }}.tar.gz
-          retention-days: 1  # Clean up old artifacts
+          retention-days: 1
 
   create-release:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Required for creating releases
+      contents: write
     if: startsWith(github.ref, 'refs/tags/v')
     
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Needed for release notes
+          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -79,6 +79,14 @@ jobs:
           path: artifacts
           pattern: smtp2tg-*.tar.gz
           merge-multiple: true
+
+      - name: Move artifacts to root directory
+        run: |
+          # Move files from their subdirectories to the artifacts root
+          find artifacts -name '*.tar.gz' -exec mv {} artifacts/ \;
+          find artifacts -name '*.sha256' -exec mv {} artifacts/ \;
+          # Remove empty subdirectories
+          find artifacts -type d -empty -delete
 
       - name: List downloaded artifacts
         run: ls -la artifacts/
@@ -92,7 +100,7 @@ jobs:
             Pre-built binaries for ${{ github.ref_name }}
             SHA256 Checksums:
             ```
-            $(cat artifacts/*.sha256)
+            $(cat artifacts/*.sha256 || echo "No checksums found")
             ```
           files: |
             artifacts/smtp2tg-*.tar.gz
