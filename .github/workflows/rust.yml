@@ -1,4 +1,4 @@
-name: Build and Release
+name: Build and Release (Single Platform)
 
 on:
   push:
@@ -10,59 +10,39 @@ env:
 
 jobs:
   build:
-    name: Build for ${{ matrix.target }}
+    name: Build for x86_64 Linux
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target: 
-          - { rust_target: 'x86_64-unknown-linux-gnu', clean_name: 'x86_64-linux' }
-          - { rust_target: 'aarch64-unknown-linux-gnu', clean_name: 'arm64-linux' }
     
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target.rust_target }}
-          components: rust-src
-
-      - name: Setup cross-compilation
-        if: matrix.target.rust_target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
-          rustup target add aarch64-unknown-linux-gnu
 
       - name: Build release binary
         run: |
-          if [ "${{ matrix.target.rust_target }}" = "aarch64-unknown-linux-gnu" ]; then
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          fi
-          cargo build --release --target ${{ matrix.target.rust_target }}
+          cargo build --release
           mkdir -p release
-          cp target/${{ matrix.target.rust_target }}/release/smtp2tg release/smtp2tg-${{ matrix.target.clean_name }}
+          cp target/release/smtp2tg release/smtp2tg-x86_64-linux
 
       - name: Create checksum
         run: |
           cd release
-          sha256sum smtp2tg-${{ matrix.target.clean_name }} > smtp2tg-${{ matrix.target.clean_name }}.sha256
+          sha256sum smtp2tg-x86_64-linux > smtp2tg-x86_64-linux.sha256
 
-      - name: Compress artifacts
+      - name: Compress artifact
         run: |
           cd release
-          tar -czvf smtp2tg-${{ matrix.target.clean_name }}.tar.gz smtp2tg-${{ matrix.target.clean_name }}
+          tar -czvf smtp2tg-x86_64-linux.tar.gz smtp2tg-x86_64-linux
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release_artifacts
+          name: smtp2tg-x86_64-linux  # Unique artifact name
           path: |
-            release/smtp2tg-${{ matrix.target.clean_name }}.tar.gz
-            release/smtp2tg-${{ matrix.target.clean_name }}.sha256
+            release/smtp2tg-x86_64-linux.tar.gz
+            release/smtp2tg-x86_64-linux.sha256
           retention-days: 1
-          # Disable automatic zipping
-          compression-level: 0
 
   create-release:
     name: Create GitHub Release
@@ -77,19 +57,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          path: release_artifacts
+          path: artifacts
+          pattern: smtp2tg-*
 
-      - name: Prepare release body
-        id: release-body
+      - name: Show files for debugging
         run: |
-          # Combine all checksum files
-          CHECKSUMS=$(cat release_artifacts/*.sha256)
-          echo "checksums<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHECKSUMS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          ls -la artifacts/
+          cat artifacts/*.sha256
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -97,14 +74,14 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           body: |
-            Pre-built binaries for ${{ github.ref_name }}
+            Pre-built binary for ${{ github.ref_name }}
             
-            SHA256 Checksums:
+            SHA256 Checksum:
             ```
-            ${{ steps.release-body.outputs.checksums }}
+            $(cat artifacts/smtp2tg-x86_64-linux.sha256)
             ```
           files: |
-            release_artifacts/*.tar.gz
-            release_artifacts/*.sha256
+            artifacts/smtp2tg-x86_64-linux.tar.gz
+            artifacts/smtp2tg-x86_64-linux.sha256
           draft: false
           prerelease: false
