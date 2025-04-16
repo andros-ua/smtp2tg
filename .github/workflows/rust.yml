@@ -153,19 +153,20 @@ jobs:
           echo "Final release assets:"
           ls -lh
           
-          # Create temporary files for checksum verification
-          ln -s smtp2tg-x86_64-linux smtp2tg
-          ln -s smtp2tg-arm64-linux smtp2tg
-          ln -s smtp2tg-x86_64-windows 'smtp2tg.exe'
+          # Verify checksums in separate directories to avoid conflicts
+          mkdir -p verify_linux verify_windows
+          cp smtp2tg-x86_64-linux verify_linux/smtp2tg
+          cp smtp2tg-arm64-linux verify_linux/smtp2tg
+          cp smtp2tg-x86_64-windows verify_windows/smtp2tg.exe
           
-          echo "Checksum verification:"
-          if ! sha256sum -c *.sha256; then
-            echo "Checksum verification failed!"
-            exit 1
-          fi
+          echo "Linux checksum verification:"
+          (cd verify_linux && sha256sum -c ../smtp2tg-*-linux.sha256)
           
-          # Clean up temporary files
-          rm -f smtp2tg 'smtp2tg.exe'
+          echo "Windows checksum verification:"
+          (cd verify_windows && sha256sum -c ../smtp2tg-x86_64-windows.sha256)
+          
+          # Clean up verification directories
+          rm -rf verify_linux verify_windows
           
           # Prepare release notes content
           echo "CHECKSUMS<<EOF" >> $GITHUB_ENV
