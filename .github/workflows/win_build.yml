@@ -1,4 +1,4 @@
-name: Build and Release Windows
+name: 🚀 Build and Release Windows
 
 on:
   push:
@@ -6,41 +6,42 @@ on:
   workflow_dispatch:
 
 env:
-  CARGO_TERM_COLOR: always
+  CARGO_TERM_COLOR: always  # Force colored output
 
 jobs:
-  build-windows:
-    name: Build Windows
+  build:
+    name: 🔧 Build Windows Binary
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: 🛠️ Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: ⚙️ Install Rust (Windows target)
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Build Release Binary
+      - name: 🏗️ Compile Release Binary
         shell: pwsh
         run: |
           cargo build --release --target x86_64-pc-windows-msvc
           mkdir -p release
           Copy-Item target/x86_64-pc-windows-msvc/release/smtp2tg.exe release/
-          Write-Output "##[group]Build Artifacts"
+          Write-Output "##[group]📦 Build Output"
           Get-ChildItem release
           Write-Output "##[endgroup]"
 
-      - name: Generate SHA256 Checksum
+      - name: 🔐 Generate Authenticode-Style Checksum
         shell: pwsh
         run: |
           $hash = (Get-FileHash -Path release/smtp2tg.exe -Algorithm SHA256).Hash.ToLower()
           "${hash} *smtp2tg.exe" | Out-File -Encoding ASCII release/smtp2tg-x86_64-windows.sha256
-          Write-Output "##[group]Checksum Verification"
+          Write-Output "##[group]🔍 Checksum Verification"
           Get-Content release/smtp2tg-x86_64-windows.sha256
           Write-Output "##[endgroup]"
 
-      - name: Upload Artifacts
+      - name: 📤 Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: smtp2tg-x86_64-windows
@@ -48,44 +49,46 @@ jobs:
             release/smtp2tg.exe
             release/smtp2tg-x86_64-windows.sha256
 
-  create-release:
-    name: Create Release
-    needs: build-windows
+  release:
+    name: 🏷️ Create GitHub Release
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Artifacts
+      - name: 📥 Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: false
+          merge-multiple: false  # Preserve directory structure
 
-      - name: Verify Artifacts
+      - name: 🔎 Validate Artifacts
         shell: bash
         run: |
-          echo "##[group]Downloaded Artifacts"
+          echo "##[group]📂 Artifact Structure"
           ls -R artifacts/
           echo "##[endgroup]"
-          echo "Checksum:"
-          cat artifacts/smtp2tg-x86_64-windows/smtp2tg-x86_64-windows.sha256
+          echo "##[group]✅ Checksum Validation"
+          cd artifacts/smtp2tg-x86_64-windows
+          sha256sum -c smtp2tg-x86_64-windows.sha256
+          echo "##[endgroup]"
 
-      - name: Package Release Assets
+      - name: 📦 Package Release
         shell: bash
         run: |
           mkdir -p release_assets
-          cp artifacts/smtp2tg-x86_64-windows/* release_assets/
+          cp -v artifacts/smtp2tg-x86_64-windows/* release_assets/
           cd release_assets
-          zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
-          echo "##[group]Final Release Assets"
+          echo "##[group]🗜️ Creating ZIP Archive"
+          zip -9 -T smtp2tg-x86_64-windows.zip smtp2tg.exe
+          echo "##[endgroup]"
+          echo "##[group]📝 Final Assets"
           ls -lh
           echo "##[endgroup]"
 
-      - name: Publish Release
+      - name: 🚀 Publish Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
