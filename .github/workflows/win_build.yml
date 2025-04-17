@@ -1,4 +1,4 @@
-name: Build Windows
+name: Build and Release Windows
 
 on:
   push:
@@ -9,12 +9,11 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  build-windows:
     name: Build Windows
     runs-on: windows-latest
 
     steps:
-      # All Windows steps use pwsh (correct)
       - uses: actions/checkout@v4
 
       - name: Install Rust
@@ -22,23 +21,26 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Build
+      - name: Build Release Binary
         shell: pwsh
         run: |
           cargo build --release --target x86_64-pc-windows-msvc
           mkdir -p release
           Copy-Item target/x86_64-pc-windows-msvc/release/smtp2tg.exe release/
-          Write-Output "=== Built files ==="
+          Write-Output "##[group]Build Artifacts"
           Get-ChildItem release
+          Write-Output "##[endgroup]"
 
-      - name: Create checksum
+      - name: Generate SHA256 Checksum
         shell: pwsh
         run: |
           $hash = (Get-FileHash -Path release/smtp2tg.exe -Algorithm SHA256).Hash.ToLower()
           "${hash} *smtp2tg.exe" | Out-File -Encoding ASCII release/smtp2tg-x86_64-windows.sha256
+          Write-Output "##[group]Checksum Verification"
           Get-Content release/smtp2tg-x86_64-windows.sha256
+          Write-Output "##[endgroup]"
 
-      - name: Upload artifacts
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: smtp2tg-x86_64-windows
@@ -48,7 +50,7 @@ jobs:
 
   create-release:
     name: Create Release
-    needs: build
+    needs: build-windows
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -57,34 +59,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download artifacts
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: false
 
-      - name: Debug artifact structure
-        shell: bash  # Linux-native shell
+      - name: Verify Artifacts
+        shell: bash
         run: |
-          echo "=== Artifact structure ==="
+          echo "##[group]Downloaded Artifacts"
           ls -R artifacts/
-          echo "=== Checksum content ==="
+          echo "##[endgroup]"
+          echo "Checksum:"
           cat artifacts/smtp2tg-x86_64-windows/smtp2tg-x86_64-windows.sha256
 
-      - name: Prepare release
-        shell: bash  # Linux-native shell
+      - name: Package Release Assets
+        shell: bash
         run: |
           mkdir -p release_assets
           cp artifacts/smtp2tg-x86_64-windows/* release_assets/
-          echo "=== Files to package ==="
-          ls -lh release_assets/
-          
           cd release_assets
           zip -0 smtp2tg-x86_64-windows.zip smtp2tg.exe
-          echo "=== Final assets ==="
+          echo "##[group]Final Release Assets"
           ls -lh
+          echo "##[endgroup]"
 
-      - name: Create Release
+      - name: Publish Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
